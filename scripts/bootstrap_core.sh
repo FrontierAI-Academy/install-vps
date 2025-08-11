@@ -13,7 +13,6 @@ STACK_BRANCH="${STACK_BRANCH:-main}"
 log() { echo -e "\033[1;36m[BOOTSTRAP]\033[0m $*"; }
 retry() { local n=0; until "$@"; do n=$((n+1)); [[ $n -ge 10 ]] && return 1; sleep 3; done; }
 
-# Espera un contenedor corriendo que matchee por nombre (grep filter)
 wait_for_container() {
   local pattern="$1"
   local cid=""
@@ -43,7 +42,7 @@ if ! docker info 2>/dev/null | grep -q "Swarm: active"; then
   docker swarm init --advertise-addr="${IP_ADDR}" || true
 fi
 
-# Crear redes overlay attachable (idempotente)
+# Redes overlay attachable
 for net in traefik_public agent_network general_network; do
   if ! docker network inspect "$net" >/dev/null 2>&1; then
     docker network create -d overlay --attachable "$net" >/dev/null 2>&1 || true
@@ -57,7 +56,7 @@ for v in certificados portainer_data postgres_data redis_data rabbitmq_data mini
   docker volume create "$v" >/dev/null 2>&1 || true
 done
 
-# Asegurar acme.json con permisos 600 para Traefik
+# acme.json 600 para Traefik
 docker run --rm -v certificados:/letsencrypt alpine \
   sh -c "touch /letsencrypt/acme.json && chmod 600 /letsencrypt/acme.json"
 
@@ -104,7 +103,14 @@ sleep 5
 
 log "Desplegando MinIO..."
 docker stack deploy -c minio.yaml minio
-sleep 10
+
+# Esperar a que MinIO esté ready (200)
+log "Esperando a que MinIO responda /minio/health/ready..."
+for _ in {1..40}; do
+  code="$(curl -sk -o /dev/null -w "%{http_code}" "https://miniobackapp.${DOMAIN}/minio/health/ready" || echo 000)"
+  [[ "$code" == "200" ]] && break
+  sleep 3
+done
 
 # ======================
 # Preparar bases en Postgres (idempotente)
@@ -122,8 +128,8 @@ fi
 # ======================
 log "Configurando MinIO para Evolution (bucket/usuario/política)..."
 MINIO_BUCKET="${MINIO_BUCKET:-evolutionapi}"
-MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-$(openssl rand -hex 12)}"   # ~24 chars
-MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-$(openssl rand -hex 24)}"   # ~48 chars
+MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-$(openssl rand -hex 12)}"
+MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-$(openssl rand -hex 24)}"
 
 # Añadir variables S3 al .env para que evolution.yaml las use
 cp .env .env.tmp
@@ -134,15 +140,14 @@ MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
 EOF
 mv .env.tmp .env
 
-# Wrapper de mc (sin shell), sobre red host y --insecure (mientras LE emite)
+# Helper de mc (cada llamada pasa MC_HOST_myminio y --insecure)
 run_mc() {
   docker run --rm --network host \
     -e MC_HOST_myminio="https://root:${MASTER_PASSWORD}@miniobackapp.${DOMAIN}" \
     minio/mc --insecure "$@"
 }
 
-# Chequear conexión y crear recursos (idempotente)
-retry run_mc ls myminio
+# Crear bucket y usuario (idempotente, sin 'mc ls' previo)
 retry run_mc mb "myminio/${MINIO_BUCKET}" || true
 retry run_mc admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
 retry run_mc admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
@@ -154,7 +159,6 @@ log "Desplegando Chatwoot..."
 docker stack deploy -c chatwoot.yaml chatwoot
 sleep 8
 
-# Preparar DB de Chatwoot (idempotente)
 log "Preparando base de Chatwoot..."
 CW_CID="$(wait_for_container 'chatwoot_chatwoot_app' || true)"
 if [[ -n "${CW_CID}" ]]; then
