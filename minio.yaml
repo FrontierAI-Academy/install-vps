@@ -7,7 +7,7 @@ services:
     environment:
       MINIO_ROOT_USER: root
       MINIO_ROOT_PASSWORD: ${PASSWORD_32_LENGTH}
-      MINIO_SERVER_URL: https://miniobackapp.${DOMAIN}          # API S3 pública
+      MINIO_SERVER_URL: https://miniobackapp.${DOMAIN}           # API S3 pública
       MINIO_BROWSER_REDIRECT_URL: https://miniofrontapp.${DOMAIN} # Dónde abrir la consola
     volumes:
       - minio_data:/data
@@ -48,9 +48,9 @@ services:
         - traefik.http.routers.minio_console.priority=100
         - traefik.http.services.minio_console.loadbalancer.server.port=9001
 
-        # Redirect /  ->  /#/login  (la consola usa rutas con hash)
-        - traefik.http.middlewares.minio_console_redirect.redirectregex.regex=^https?://([^/]+)/?$
-        - traefik.http.middlewares.minio_console_redirect.redirectregex.replacement=https://$1/#/login
+        # Redirect /  ->  /#/login  (ESCAPANDO $ → $$)
+        - traefik.http.middlewares.minio_console_redirect.redirectregex.regex=^https?://([^/]+)/?$$
+        - traefik.http.middlewares.minio_console_redirect.redirectregex.replacement=https://$$1/#/login
         - traefik.http.middlewares.minio_console_redirect.redirectregex.permanent=true
         - traefik.http.routers.minio_console.middlewares=minio_console_redirect
 
