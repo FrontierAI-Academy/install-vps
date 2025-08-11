@@ -108,14 +108,13 @@ sleep 5
 
 log "Desplegando MinIO..."
 docker stack deploy -c minio.yaml minio
-
-# Esperar a que MinIO esté ready (200). Si no llega a 200, seguimos igual.
-log "Esperando a que MinIO responda /minio/health/ready..."
-for _ in {1..40}; do
-  code="$(curl -sk -o /dev/null -w "%{http_code}" "https://miniobackapp.${DOMAIN}/minio/health/ready" || echo 000)"
-  [[ "$code" == "200" ]] && break
+# Espera suave a que el contenedor exista
+for _ in {1..20}; do
+  if docker service ps minio_minio --no-trunc 2>/dev/null | grep -qE 'Running|Ready'; then break; fi
   sleep 3
 done
+# Pequeña pausa adicional
+sleep 5
 
 # ======================
 # Preparar bases en Postgres (idempotente)
@@ -130,6 +129,7 @@ fi
 
 # ======================
 # MinIO: bucket + usuario + policy (crea credenciales S3 para Evolution)
+# Usamos la red interna de Swarm (sin Traefik/HTTPS) -> http://minio_minio:9000
 # ======================
 log "Configurando MinIO para Evolution (bucket/usuario/política)..."
 MINIO_BUCKET="${MINIO_BUCKET:-evolutionapi}"
@@ -145,17 +145,14 @@ MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
 EOF
 mv .env.tmp .env
 
-# Helper de mc (cada llamada pasa MC_HOST_myminio y --insecure)
-run_mc() {
-  docker run --rm --network host \
-    -e MC_HOST_myminio="https://root:${PASSWORD_32_LENGTH}@miniobackapp.${DOMAIN}" \
-    minio/mc --insecure "$@"
-}
+# Helper mc por red overlay interna
+mc_i() { docker run --rm --network traefik_public minio/mc "$@"; }
 
-# Crear bucket y usuario (idempotente)
-retry run_mc mb "myminio/${MINIO_BUCKET}" || true
-retry run_mc admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
-retry run_mc admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
+# Crear alias interno y operar (idempotente)
+retry mc_i alias set myminio "http://minio_minio:9000" root "${PASSWORD_32_LENGTH}"
+retry mc_i mb "myminio/${MINIO_BUCKET}" || true
+retry mc_i admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
+retry mc_i admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
 
 # ======================
 # Aplicaciones
