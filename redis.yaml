@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:8.0.3
+    command: ['redis-server', '--appendonly', 'yes', '--port', '6379']
+    networks:
+      - general_network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+
+volumes:
+  redis_data:
+    external: true
+
+networks:
+  general_network:
+    external: true

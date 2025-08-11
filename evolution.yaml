@@ -1,0 +1,143 @@
+version: '3.8'
+
+services:
+  evolution_api_v2:
+    image: evoapicloud/evolution-api:v2.3.0
+    command: node --max-old-space-size=3072 dist/main
+    volumes:
+      - evolution_v2_instances:/evolution/instances
+    networks:
+      - traefik_public
+      - general_network
+    environment:
+      - SERVER_URL=https://evolutionapiapp.${DOMAIN}
+
+      # Auth and DB
+      - AUTHENTICATION_API_KEY=${PASSWORD_32_LENGTH}
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://postgres:${PASSWORD_32_LENGTH}@postgres:5432/evolution2
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution_api
+
+      # Messaging
+      - RABBITMQ_ENABLED=true
+      - RABBITMQ_URI=amqp://root:${PASSWORD_32_LENGTH}@rabbit_mq:5672/default
+      - RABBITMQ_EXCHANGE_NAME=evolution_api
+
+      # Redis cache
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379/6
+      - CACHE_REDIS_PREFIX_KEY=evolution_api
+      - CACHE_REDIS_SAVE_INSTANCES=false
+      - CACHE_LOCAL_ENABLED=false
+
+      # S3 (auto-provisioned by bootstrap)
+      - S3_ENABLED=true
+      - S3_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - S3_SECRET_KEY=${MINIO_SECRET_KEY}
+      - S3_BUCKET=${MINIO_BUCKET}
+      - S3_PORT=443
+      - S3_ENDPOINT=miniobackapp.${DOMAIN}
+      - S3_USE_SSL=true
+
+      # Chatwoot import (optional but you had it)
+      - CHATWOOT_ENABLED=true
+      - CHATWOOT_MESSAGE_READ=true
+      - CHATWOOT_MESSAGE_DELETE=false
+      - CHATWOOT_IMPORT_DATABASE_CONNECTION_URI=postgresql://postgres:${PASSWORD_32_LENGTH}@postgres:5432/chatwoot?sslmode=disable
+      - CHATWOOT_IMPORT_PLACEHOLDER_MEDIA_MESSAGE=true
+
+      # CORS & general
+      - DEL_INSTANCE=false
+      - CORS_ORIGIN=*
+      - CORS_METHODS=POST,GET,PUT,DELETE
+      - CORS_CREDENTIALS=true
+
+      # Logging
+      - LOG_LEVEL=ERROR,WARN
+      - LOG_COLOR=true
+      - LOG_BAILEYS=error
+
+      # WhatsApp client config
+      - CONFIG_SESSION_PHONE_CLIENT=Evolution API V2
+      - CONFIG_SESSION_PHONE_NAME=Chrome
+      - CONFIG_SESSION_PHONE_VERSION=2.3000.1023204200
+      - QRCODE_LIMIT=1902
+      - QRCODE_COLOR=#000000
+
+      # Optional webhooks/providers (left disabled as in your file)
+      - PROVIDER_ENABLED=false
+      - PROVIDER_HOST=127.0.0.1
+      - PROVIDER_PORT=5656
+      - PROVIDER_PREFIX=evolution_api
+      - WEBSOCKET_ENABLED=false
+      - WEBSOCKET_GLOBAL_EVENTS=false
+      - WEBHOOK_GLOBAL_ENABLED=false
+      - WEBHOOK_GLOBAL_URL=https://URL
+      - WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS=false
+      - WEBHOOK_EVENTS_APPLICATION_STARTUP=false
+      - WEBHOOK_EVENTS_QRCODE_UPDATED=true
+      - WEBHOOK_EVENTS_MESSAGES_SET=true
+      - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
+      - WEBHOOK_EVENTS_MESSAGES_EDITED=true
+      - WEBHOOK_EVENTS_MESSAGES_UPDATE=true
+      - WEBHOOK_EVENTS_MESSAGES_DELETE=true
+      - WEBHOOK_EVENTS_SEND_MESSAGE=true
+      - WEBHOOK_EVENTS_CONTACTS_SET=true
+      - WEBHOOK_EVENTS_CONTACTS_UPSERT=true
+      - WEBHOOK_EVENTS_CONTACTS_UPDATE=true
+      - WEBHOOK_EVENTS_PRESENCE_UPDATE=true
+      - WEBHOOK_EVENTS_CHATS_SET=true
+      - WEBHOOK_EVENTS_CHATS_UPSERT=true
+      - WEBHOOK_EVENTS_CHATS_UPDATE=true
+      - WEBHOOK_EVENTS_CHATS_DELETE=true
+      - WEBHOOK_EVENTS_GROUPS_UPSERT=true
+      - WEBHOOK_EVENTS_GROUPS_UPDATE=true
+      - WEBHOOK_EVENTS_GROUP_PARTICIPANTS_UPDATE=true
+      - WEBHOOK_EVENTS_CONNECTION_UPDATE=true
+      - WEBHOOK_EVENTS_LABELS_EDIT=true
+      - WEBHOOK_EVENTS_LABELS_ASSOCIATION=true
+      - WEBHOOK_EVENTS_CALL=true
+      - WEBHOOK_EVENTS_TYPEBOT_START=false
+      - WEBHOOK_EVENTS_TYPEBOT_CHANGE_STATUS=false
+      - WEBHOOK_EVENTS_ERRORS=false
+      - WEBHOOK_EVENTS_ERRORS_WEBHOOK=https://url
+
+      # Feature toggles you had
+      - OPENAI_ENABLED=true
+      - DIFY_ENABLED=true
+      - TYPEBOT_ENABLED=true
+      - TYPEBOT_SEND_MEDIA_BASE64=true
+      - TYPEBOT_API_VERSION=latest
+
+      # Language
+      - LANGUAGE=es
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '1'
+          memory: 4096M
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.evolution_api_v2.rule=Host(`evolutionapiapp.${DOMAIN}`)
+        - traefik.http.routers.evolution_api_v2.entrypoints=websecure
+        - traefik.http.routers.evolution_api_v2.tls.certresolver=le
+        - traefik.http.routers.evolution_api_v2.service=evolution_api_v2
+        - traefik.http.services.evolution_api_v2.loadbalancer.server.port=8080
+        - traefik.http.services.evolution_api_v2.loadbalancer.passHostHeader=true
+
+volumes:
+  evolution_v2_instances:
+    external: true
+    name: evolution_v2_instances
+
+networks:
+  traefik_public:
+    external: true
+  general_network:
+    external: true

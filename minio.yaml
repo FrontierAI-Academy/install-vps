@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: root
+      MINIO_ROOT_PASSWORD: ${PASSWORD_32_LENGTH}
+      MINIO_BROWSER_REDIRECT_URL: https://miniofrontapp.${DOMAIN}
+      MINIO_SERVER_URL: https://miniobackapp.${DOMAIN}
+    volumes:
+      - minio_data:/data
+    networks:
+      - traefik_public
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/minio/health/ready >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1024M
+      labels:
+        - traefik.enable=true
+
+        # S3 API
+        - traefik.http.routers.minio_s3.rule=Host(`miniobackapp.${DOMAIN}`)
+        - traefik.http.routers.minio_s3.entrypoints=websecure
+        - traefik.http.routers.minio_s3.tls.certresolver=le
+        - traefik.http.routers.minio_s3.service=minio_s3
+        - traefik.http.services.minio_s3.loadbalancer.server.port=9000
+
+        # Console
+        - traefik.http.routers.minio_console.rule=Host(`miniofrontapp.${DOMAIN}`)
+        - traefik.http.routers.minio_console.entrypoints=websecure
+        - traefik.http.routers.minio_console.tls.certresolver=le
+        - traefik.http.routers.minio_console.service=minio_console
+        - traefik.http.services.minio_console.loadbalancer.server.port=9001
+
+volumes:
+  minio_data:
+    external: true
+
+networks:
+  traefik_public:
+    external: true

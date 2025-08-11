@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16.4
+    command: [ "postgres", "--max_connections=100" ]
+    environment:
+      - POSTGRES_PASSWORD=${PASSWORD_32_LENGTH}
+      # opcionales:
+      # - POSTGRES_USER=postgres
+      # - POSTGRES_DB=postgres
+      # - TZ=UTC
+    networks:
+      - general_network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2048M
+
+volumes:
+  postgres_data:
+    external: true
+
+networks:
+  general_network:
+    external: true
