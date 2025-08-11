@@ -17,7 +17,7 @@ retry() { local n=0; until "$@"; do n=$((n+1)); [[ $n -ge 10 ]] && return 1; sle
 wait_for_container() {
   local pattern="$1"
   local cid=""
-  for i in {1..40}; do
+  for _ in {1..40}; do
     cid="$(docker ps --filter "name=${pattern}" --format '{{.ID}}' | head -n1 || true)"
     if [[ -n "$cid" ]]; then echo "$cid"; return 0; fi
     sleep 3
@@ -43,8 +43,11 @@ if ! docker info 2>/dev/null | grep -q "Swarm: active"; then
   docker swarm init --advertise-addr="${IP_ADDR}" || true
 fi
 
+# Create overlay networks as attachable (idempotent)
 for net in traefik_public agent_network general_network; do
-  docker network create -d overlay "$net" >/dev/null 2>&1 || true
+  if ! docker network inspect "$net" >/dev/null 2>&1; then
+    docker network create -d overlay --attachable "$net" >/dev/null 2>&1 || true
+  fi
 done
 
 # ======================
@@ -133,7 +136,8 @@ mv .env.tmp .env
 
 # Configure MinIO via mc using root/${MASTER_PASSWORD}
 # NOTE: minio.yaml must set MINIO_ROOT_USER=root and MINIO_ROOT_PASSWORD=${PASSWORD_32_LENGTH}
-retry docker run --rm --network traefik_public \
+# Use --network host to avoid overlay attach restrictions
+retry docker run --rm --network host \
   -e MC_HOST_myminio="https://root:${MASTER_PASSWORD}@miniobackapp.${DOMAIN}" \
   minio/mc sh -c "
     set -e
