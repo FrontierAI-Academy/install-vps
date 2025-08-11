@@ -28,7 +28,7 @@ wait_for_container() {
 # ======================
 # Docker install
 # ======================
-if ! command -v docker >/dev/null 2>&1; then
+if ! command -v docker >/dev/null 2/*>&1; then
   log "Installing Docker..."
   curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
   sh /tmp/get-docker.sh
@@ -134,34 +134,18 @@ MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
 EOF
 mv .env.tmp .env
 
-# Configure MinIO via mc using root/${MASTER_PASSWORD}
-# NOTE: minio.yaml must set MINIO_ROOT_USER=root and MINIO_ROOT_PASSWORD=${PASSWORD_32_LENGTH}
-# Use --network host to avoid overlay attach restrictions
-retry docker run --rm --network host \
-  -e MC_HOST_myminio="https://root:${MASTER_PASSWORD}@miniobackapp.${DOMAIN}" \
-  minio/mc sh -c "
-    set -e
-    mc alias ls >/dev/null
-    mc mb myminio/${MINIO_BUCKET} || true
-    cat >/tmp/evolution-s3-policy.json <<POL
-{
-  \"Version\": \"2012-10-17\",
-  \"Statement\": [
-    {
-      \"Effect\": \"Allow\",
-      \"Action\": [\"s3:*\"],
-      \"Resource\": [
-        \"arn:aws:s3:::${MINIO_BUCKET}\",
-        \"arn:aws:s3:::${MINIO_BUCKET}/*\"
-      ]
-    }
-  ]
+# Helper: run minio client without shell and ignoring TLS while LE emite el cert
+run_mc() {
+  docker run --rm --network host \
+    -e MC_HOST_myminio="https://root:${MASTER_PASSWORD}@miniobackapp.${DOMAIN}" \
+    minio/mc --insecure "$@"
 }
-POL
-    mc admin policy create myminio evolution-s3-policy /tmp/evolution-s3-policy.json || true
-    mc admin user add myminio ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} || true
-    mc admin policy attach myminio evolution-s3-policy --user ${MINIO_ACCESS_KEY}
-  "
+
+# Test / create bucket / user / attach built-in readwrite policy
+retry run_mc ls myminio
+retry run_mc mb "myminio/${MINIO_BUCKET}" || true
+retry run_mc admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
+retry run_mc admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
 
 # ======================
 # Apps
@@ -174,7 +158,6 @@ sleep 8
 log "Preparing Chatwoot database..."
 CW_CID="$(wait_for_container 'chatwoot_chatwoot_app' || true)"
 if [[ -n "${CW_CID}" ]]; then
-  # Retry in case rails is still booting
   retry docker exec -i "${CW_CID}" bundle exec rails db:chatwoot_prepare || true
 else
   log "WARNING: Chatwoot app container not found to run db:chatwoot_prepare"
