@@ -78,6 +78,16 @@ ADMIN_EMAIL=${ADMIN_EMAIL}
 PASSWORD_32_LENGTH=${MASTER_PASSWORD}
 EOF
 
+# Portainer: generar y guardar hash bcrypt del admin (usuario 'admin')
+log "Generando hash bcrypt para el admin de Portainer..."
+PORTAINER_ADMIN_HASH="$(docker run --rm httpd:2.4-alpine htpasswd -nbB admin "${MASTER_PASSWORD}" | cut -d':' -f2)"
+
+cp .env .env.tmp
+cat >> .env.tmp <<EOF
+PORTAINER_ADMIN_HASH=${PORTAINER_ADMIN_HASH}
+EOF
+mv .env.tmp .env
+
 # Exportar variables para que compose las interpole
 set -a
 . ./.env
@@ -156,13 +166,12 @@ if [[ -z "${MINIO_CID}" ]]; then
 fi
 
 if [[ -n "${MINIO_CID}" ]]; then
-  # Helper: ejecutar mc compartiendo el namespace de red del contenedor de MinIO
+  # Ejecutar mc compartiendo el namespace de red del contenedor de MinIO
   mc_ns() {
     docker run --rm --network "container:${MINIO_CID}" \
       -e MC_HOST_myminio="http://root:${PASSWORD_32_LENGTH}@127.0.0.1:9000" \
       minio/mc "$@"
   }
-  # Retries idempotentes
   retry mc_ns mb "myminio/${MINIO_BUCKET}" || true
   retry mc_ns admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
   retry mc_ns admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
