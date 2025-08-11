@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  chatwoot_app:
+    image: chatwoot/chatwoot:v3.16.0
+    command: bundle exec rails s -p 3000 -b 0.0.0.0
+    entrypoint: docker/entrypoints/rails.sh
+    volumes:
+      - chatwoot_data:/app/storage
+    networks:
+      - traefik_public
+      - general_network
+    environment:
+      INSTALLATION_NAME: root
+      NODE_ENV: production
+      RAILS_ENV: production
+      INSTALLATION_ENV: docker
+      SECRET_KEY_BASE: ${PASSWORD_32_LENGTH}
+      FRONTEND_URL: https://chatwootapp.${DOMAIN}
+      DEFAULT_LOCALE: pt_BR
+      FORCE_SSL: 'true'
+      ENABLE_ACCOUNT_SIGNUP: 'false'
+      REDIS_URL: redis://redis:6379
+      MAILER_SENDER_EMAIL: no-reply@${DOMAIN}
+      POSTGRES_HOST: postgres
+      POSTGRES_USERNAME: postgres
+      POSTGRES_PASSWORD: ${PASSWORD_32_LENGTH}
+      POSTGRES_DATABASE: chatwoot
+      ACTIVE_STORAGE_SERVICE: local
+      RAILS_LOG_TO_STDOUT: 'true'
+      USE_INBOX_AVATAR_FOR_BOT: 'true'
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.chatwoot_app.rule=Host(`chatwootapp.${DOMAIN}`)
+        - traefik.http.routers.chatwoot_app.entrypoints=websecure
+        - traefik.http.routers.chatwoot_app.tls.certresolver=le
+        - traefik.http.routers.chatwoot_app.service=chatwoot_app
+        - traefik.http.services.chatwoot_app.loadbalancer.server.port=3000
+        - traefik.http.middlewares.sslheader.headers.customrequestheaders.X-Forwarded-Proto=https
+        - traefik.http.routers.chatwoot_app.middlewares=sslheader
+
+  chatwoot_worker:
+    image: chatwoot/chatwoot:v3.16.0
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    volumes:
+      - chatwoot_data:/app/storage
+    networks:
+      - general_network
+    environment:
+      INSTALLATION_NAME: root
+      NODE_ENV: production
+      RAILS_ENV: production
+      INSTALLATION_ENV: docker
+      SECRET_KEY_BASE: ${PASSWORD_32_LENGTH}
+      FRONTEND_URL: https://chatwootapp.${DOMAIN}
+      DEFAULT_LOCALE: pt_BR
+      FORCE_SSL: 'true'
+      ENABLE_ACCOUNT_SIGNUP: 'false'
+      REDIS_URL: redis://redis:6379
+      MAILER_SENDER_EMAIL: no-reply@${DOMAIN}
+      POSTGRES_HOST: postgres
+      POSTGRES_USERNAME: postgres
+      POSTGRES_PASSWORD: ${PASSWORD_32_LENGTH}
+      POSTGRES_DATABASE: chatwoot
+      ACTIVE_STORAGE_SERVICE: local
+      RAILS_LOG_TO_STDOUT: 'true'
+      USE_INBOX_AVATAR_FOR_BOT: 'true'
+      SIDEKIQ_CONCURRENCY: '3'
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 3G
+
+volumes:
+  chatwoot_data:
+    external: true
+
+networks:
+  traefik_public:
+    external: true
+  general_network:
+    external: true
