@@ -108,8 +108,8 @@ sleep 5
 
 log "Desplegando MinIO..."
 docker stack deploy -c minio.yaml minio
-# Espera a que al menos el task exista
-for _ in {1..20}; do
+# Espera a que el servicio tenga al menos una tarea viva
+for _ in {1..30}; do
   if docker service ps minio_minio --no-trunc 2>/dev/null | grep -qE 'Running|Ready'; then break; fi
   sleep 3
 done
@@ -128,7 +128,7 @@ fi
 
 # ======================
 # MinIO: bucket + usuario + policy (crea credenciales S3 para Evolution)
-# Usamos la red interna de Swarm (sin Traefik/HTTPS)
+# SIN DNS: nos pegamos al namespace de red del contenedor de MinIO y usamos 127.0.0.1:9000
 # ======================
 log "Configurando MinIO para Evolution (bucket/usuario/política)..."
 MINIO_BUCKET="${MINIO_BUCKET:-evolutionapi}"
@@ -144,17 +144,31 @@ MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
 EOF
 mv .env.tmp .env
 
-# Helper mc por red overlay interna (SIN alias persistente: cada llamada define MC_HOST_myminio)
-mc_i() {
-  docker run --rm --network traefik_public \
-    -e MC_HOST_myminio="http://root:${PASSWORD_32_LENGTH}@minio_minio:9000" \
-    minio/mc "$@"
-}
+# Obtener el contenedor de MinIO
+MINIO_CID="$(wait_for_container 'minio_minio' || true)"
+if [[ -z "${MINIO_CID}" ]]; then
+  log "AVISO: No se encontró el contenedor de MinIO aún. Reintentando breve..."
+  for _ in {1..10}; do
+    MINIO_CID="$(docker ps --filter "name=minio_minio" --format '{{.ID}}' | head -n1 || true)"
+    [[ -n "${MINIO_CID}" ]] && break
+    sleep 3
+  done
+fi
 
-# Retries idempotentes (evitamos 'mc alias set' porque no persiste entre contenedores)
-retry mc_i mb "myminio/${MINIO_BUCKET}" || true
-retry mc_i admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
-retry mc_i admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
+if [[ -n "${MINIO_CID}" ]]; then
+  # Helper: ejecutar mc compartiendo el namespace de red del contenedor de MinIO
+  mc_ns() {
+    docker run --rm --network "container:${MINIO_CID}" \
+      -e MC_HOST_myminio="http://root:${PASSWORD_32_LENGTH}@127.0.0.1:9000" \
+      minio/mc "$@"
+  }
+  # Retries idempotentes
+  retry mc_ns mb "myminio/${MINIO_BUCKET}" || true
+  retry mc_ns admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
+  retry mc_ns admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
+else
+  log "AVISO: No se pudo detectar el contenedor de MinIO; omitiendo provisión automática de bucket/usuario."
+fi
 
 # ======================
 # Aplicaciones
