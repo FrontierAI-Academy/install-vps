@@ -78,7 +78,7 @@ ADMIN_EMAIL=${ADMIN_EMAIL}
 PASSWORD_32_LENGTH=${MASTER_PASSWORD}
 EOF
 
-# Exportar las variables del .env para que docker stack deploy las interpole
+# Exportar variables para que compose las interpole
 set -a
 . ./.env
 set +a
@@ -108,12 +108,11 @@ sleep 5
 
 log "Desplegando MinIO..."
 docker stack deploy -c minio.yaml minio
-# Espera suave a que el contenedor exista
+# Espera a que al menos el task exista
 for _ in {1..20}; do
   if docker service ps minio_minio --no-trunc 2>/dev/null | grep -qE 'Running|Ready'; then break; fi
   sleep 3
 done
-# Pequeña pausa adicional
 sleep 5
 
 # ======================
@@ -129,7 +128,7 @@ fi
 
 # ======================
 # MinIO: bucket + usuario + policy (crea credenciales S3 para Evolution)
-# Usamos la red interna de Swarm (sin Traefik/HTTPS) -> http://minio_minio:9000
+# Usamos la red interna de Swarm (sin Traefik/HTTPS)
 # ======================
 log "Configurando MinIO para Evolution (bucket/usuario/política)..."
 MINIO_BUCKET="${MINIO_BUCKET:-evolutionapi}"
@@ -145,11 +144,11 @@ MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
 EOF
 mv .env.tmp .env
 
-# Helper mc por red overlay interna
+# Helper mc por red overlay interna (hablando al servicio swarm)
 mc_i() { docker run --rm --network traefik_public minio/mc "$@"; }
 
 # Crear alias interno y operar (idempotente)
-retry mc_i alias set myminio "http://minio_minio:9000" root "${PASSWORD_32_LENGTH}"
+retry mc_i alias set myminio "http://minio_minio:9000" root "${PASSWORD_32_LENGTH}" || true
 retry mc_i mb "myminio/${MINIO_BUCKET}" || true
 retry mc_i admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
 retry mc_i admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
