@@ -144,11 +144,14 @@ MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
 EOF
 mv .env.tmp .env
 
-# Helper mc por red overlay interna (hablando al servicio swarm)
-mc_i() { docker run --rm --network traefik_public minio/mc "$@"; }
+# Helper mc por red overlay interna (SIN alias persistente: cada llamada define MC_HOST_myminio)
+mc_i() {
+  docker run --rm --network traefik_public \
+    -e MC_HOST_myminio="http://root:${PASSWORD_32_LENGTH}@minio_minio:9000" \
+    minio/mc "$@"
+}
 
-# Crear alias interno y operar (idempotente)
-retry mc_i alias set myminio "http://minio_minio:9000" root "${PASSWORD_32_LENGTH}" || true
+# Retries idempotentes (evitamos 'mc alias set' porque no persiste entre contenedores)
 retry mc_i mb "myminio/${MINIO_BUCKET}" || true
 retry mc_i admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
 retry mc_i admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
