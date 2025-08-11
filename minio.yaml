@@ -7,8 +7,8 @@ services:
     environment:
       MINIO_ROOT_USER: root
       MINIO_ROOT_PASSWORD: ${PASSWORD_32_LENGTH}
-      MINIO_BROWSER_REDIRECT_URL: https://miniofrontapp.${DOMAIN}
-      MINIO_SERVER_URL: https://miniobackapp.${DOMAIN}
+      MINIO_SERVER_URL: https://miniobackapp.${DOMAIN}          # API S3 pública
+      MINIO_BROWSER_REDIRECT_URL: https://miniofrontapp.${DOMAIN} # Dónde abrir la consola
     volumes:
       - minio_data:/data
     networks:
@@ -31,19 +31,28 @@ services:
       labels:
         - traefik.enable=true
 
-        # S3 API
+        # ---------- API S3 (puerto 9000)
         - traefik.http.routers.minio_s3.rule=Host(`miniobackapp.${DOMAIN}`)
         - traefik.http.routers.minio_s3.entrypoints=websecure
+        - traefik.http.routers.minio_s3.tls=true
         - traefik.http.routers.minio_s3.tls.certresolver=le
         - traefik.http.routers.minio_s3.service=minio_s3
         - traefik.http.services.minio_s3.loadbalancer.server.port=9000
 
-        # Console
+        # ---------- Consola (puerto 9001)
         - traefik.http.routers.minio_console.rule=Host(`miniofrontapp.${DOMAIN}`)
         - traefik.http.routers.minio_console.entrypoints=websecure
+        - traefik.http.routers.minio_console.tls=true
         - traefik.http.routers.minio_console.tls.certresolver=le
         - traefik.http.routers.minio_console.service=minio_console
+        - traefik.http.routers.minio_console.priority=100
         - traefik.http.services.minio_console.loadbalancer.server.port=9001
+
+        # Redirect /  ->  /#/login  (la consola usa rutas con hash)
+        - traefik.http.middlewares.minio_console_redirect.redirectregex.regex=^https?://([^/]+)/?$
+        - traefik.http.middlewares.minio_console_redirect.redirectregex.replacement=https://$1/#/login
+        - traefik.http.middlewares.minio_console_redirect.redirectregex.permanent=true
+        - traefik.http.routers.minio_console.middlewares=minio_console_redirect
 
 volumes:
   minio_data:

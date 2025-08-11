@@ -80,13 +80,10 @@ EOF
 
 # Portainer: generar y guardar hash bcrypt del admin (usuario 'admin')
 log "Generando hash bcrypt para el admin de Portainer..."
-PORTAINER_ADMIN_HASH="$(docker run --rm httpd:2.4-alpine htpasswd -nbB admin "${MASTER_PASSWORD}" | cut -d':' -f2)"
+PORTAINER_ADMIN_HASH="$(docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 admin "${MASTER_PASSWORD}" | cut -d':' -f2)"
 
-cp .env .env.tmp
-cat >> .env.tmp <<EOF
-PORTAINER_ADMIN_HASH=${PORTAINER_ADMIN_HASH}
-EOF
-mv .env.tmp .env
+# Añadir el hash al .env ENTRE COMILLAS para evitar expansión de $2y...
+printf "PORTAINER_ADMIN_PASSWORD_BCRYPT='%s'\n" "$PORTAINER_ADMIN_HASH" >> .env
 
 # Exportar variables para que compose las interpole
 set -a
@@ -146,13 +143,11 @@ MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-$(openssl rand -hex 12)}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-$(openssl rand -hex 24)}"
 
 # Añadir variables S3 al .env para que evolution.yaml las use
-cp .env .env.tmp
-cat >> .env.tmp <<EOF
-MINIO_BUCKET=${MINIO_BUCKET}
-MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
-EOF
-mv .env.tmp .env
+{
+  echo "MINIO_BUCKET=${MINIO_BUCKET}"
+  echo "MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}"
+  echo "MINIO_SECRET_KEY=${MINIO_SECRET_KEY}"
+} >> .env
 
 # Obtener el contenedor de MinIO
 MINIO_CID="$(wait_for_container 'minio_minio' || true)"

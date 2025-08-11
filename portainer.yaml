@@ -16,10 +16,10 @@ services:
 
   portainer:
     image: portainer/portainer-ce:2.20.1
-    command:
-      - -H tcp://tasks.agent:9001
-      - --tlsskipverify
-      - --admin-password=${PORTAINER_ADMIN_HASH}
+    command: >
+      -H tcp://tasks.agent:9001
+      --tlsskipverify
+      --admin-password ${PORTAINER_ADMIN_PASSWORD_BCRYPT}
     volumes:
       - portainer_data:/data
     networks:
