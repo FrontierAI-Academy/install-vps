@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ======================
-# Inputs (from install.sh)
+# Entradas (desde install.sh)
 # ======================
 DOMAIN="${DOMAIN:?DOMAIN is required}"
 ADMIN_EMAIL="${ADMIN_EMAIL:?ADMIN_EMAIL is required}"
@@ -13,7 +13,7 @@ STACK_BRANCH="${STACK_BRANCH:-main}"
 log() { echo -e "\033[1;36m[BOOTSTRAP]\033[0m $*"; }
 retry() { local n=0; until "$@"; do n=$((n+1)); [[ $n -ge 10 ]] && return 1; sleep 3; done; }
 
-# Wait for a running container by name (grep filter)
+# Espera un contenedor corriendo que matchee por nombre (grep filter)
 wait_for_container() {
   local pattern="$1"
   local cid=""
@@ -26,24 +26,24 @@ wait_for_container() {
 }
 
 # ======================
-# Docker install
+# Instalar Docker si falta
 # ======================
-if ! command -v docker >/dev/null 2/*>&1; then
-  log "Installing Docker..."
+if ! command -v docker >/dev/null 2>&1; then
+  log "Instalando Docker..."
   curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
   sh /tmp/get-docker.sh
 fi
 
 # ======================
-# Swarm & Networks
+# Swarm & Redes
 # ======================
 if ! docker info 2>/dev/null | grep -q "Swarm: active"; then
-  log "Initializing Docker Swarm..."
+  log "Inicializando Docker Swarm..."
   IP_ADDR="$(hostname -I | awk '{print $1}')"
   docker swarm init --advertise-addr="${IP_ADDR}" || true
 fi
 
-# Create overlay networks as attachable (idempotent)
+# Crear redes overlay attachable (idempotente)
 for net in traefik_public agent_network general_network; do
   if ! docker network inspect "$net" >/dev/null 2>&1; then
     docker network create -d overlay --attachable "$net" >/dev/null 2>&1 || true
@@ -51,27 +51,27 @@ for net in traefik_public agent_network general_network; do
 done
 
 # ======================
-# Volumes (incl. certificates)
+# Volúmenes (incluye certificados)
 # ======================
 for v in certificados portainer_data postgres_data redis_data rabbitmq_data minio_data evolution_v2_instances chatwoot_data; do
   docker volume create "$v" >/dev/null 2>&1 || true
 done
 
-# Ensure acme.json exists with 600 permissions for Traefik
+# Asegurar acme.json con permisos 600 para Traefik
 docker run --rm -v certificados:/letsencrypt alpine \
   sh -c "touch /letsencrypt/acme.json && chmod 600 /letsencrypt/acme.json"
 
 # ======================
-# Fetch stacks repo (fresh)
+# Descargar repo de stacks (fresco)
 # ======================
-log "Fetching stacks repo..."
+log "Descargando repositorio de stacks..."
 mkdir -p /opt/stacks && cd /opt/stacks
 rm -rf repo || true
 retry git clone --depth 1 -b "$STACK_BRANCH" "$REPO_URL" repo
 cd repo
 
 # ======================
-# .env for compose substitution
+# .env para sustitución en YAML
 # ======================
 cat > .env <<EOF
 DOMAIN=${DOMAIN}
@@ -80,36 +80,36 @@ PASSWORD_32_LENGTH=${MASTER_PASSWORD}
 EOF
 
 # ======================
-# Deploy base stacks
+# Despliegue base
 # ======================
-log "Deploying Traefik..."
+log "Desplegando Traefik..."
 docker stack deploy -c traefik.yaml traefik
 sleep 8
 
-log "Deploying Portainer..."
+log "Desplegando Portainer..."
 docker stack deploy -c portainer.yaml portainer
 sleep 5
 
-log "Deploying Postgres..."
+log "Desplegando Postgres..."
 docker stack deploy -c postgres.yaml postgres
 sleep 5
 
-log "Deploying Redis..."
+log "Desplegando Redis..."
 docker stack deploy -c redis.yaml redis
 sleep 5
 
-log "Deploying RabbitMQ..."
+log "Desplegando RabbitMQ..."
 docker stack deploy -c rabbitmq.yaml rabbitmq
 sleep 5
 
-log "Deploying MinIO..."
+log "Desplegando MinIO..."
 docker stack deploy -c minio.yaml minio
 sleep 10
 
 # ======================
-# Prepare Postgres databases (idempotent)
+# Preparar bases en Postgres (idempotente)
 # ======================
-log "Creating databases (chatwoot, evolution2, n8n_fila)..."
+log "Creando bases de datos (chatwoot, evolution2, n8n_fila)..."
 PG_ID="$(docker ps --filter name=postgres_postgres --format '{{.ID}}' | head -n1 || true)"
 if [[ -n "${PG_ID}" ]]; then
   docker exec -i "$PG_ID" psql -U postgres -c "CREATE DATABASE chatwoot;"  >/dev/null 2>&1 || true
@@ -118,14 +118,14 @@ if [[ -n "${PG_ID}" ]]; then
 fi
 
 # ======================
-# MinIO: bucket + user + policy (auto S3 creds for Evolution)
+# MinIO: bucket + usuario + policy (crea credenciales S3 para Evolution)
 # ======================
-log "Configuring MinIO for Evolution (bucket/user/policy)..."
+log "Configurando MinIO para Evolution (bucket/usuario/política)..."
 MINIO_BUCKET="${MINIO_BUCKET:-evolutionapi}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-$(openssl rand -hex 12)}"   # ~24 chars
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:-$(openssl rand -hex 24)}"   # ~48 chars
 
-# Append S3 vars to .env so compose can substitute in evolution.yaml
+# Añadir variables S3 al .env para que evolution.yaml las use
 cp .env .env.tmp
 cat >> .env.tmp <<EOF
 MINIO_BUCKET=${MINIO_BUCKET}
@@ -134,49 +134,52 @@ MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
 EOF
 mv .env.tmp .env
 
-# Helper: run minio client without shell and ignoring TLS while LE emite el cert
+# Wrapper de mc (sin shell), sobre red host y --insecure (mientras LE emite)
 run_mc() {
-  docker run --rm --network host \
-    -e MC_HOST_myminio="https://root:${MASTER_PASSWORD}@miniobackapp.${DOMAIN}" \
-    minio/mc --insecure "$@"
+  docker run --rm --network host minio/mc --insecure "$@"
 }
 
-# Test / create bucket / user / attach built-in readwrite policy
-retry run_mc ls myminio
+# Definir alias explícito y probar conectividad
+retry run_mc alias set myminio "https://miniobackapp.${DOMAIN}" root "${MASTER_PASSWORD}"
+retry run_mc alias ls
+
+# Crear bucket (idempotente)
 retry run_mc mb "myminio/${MINIO_BUCKET}" || true
+
+# Crear usuario y asignar política readwrite (idempotente)
 retry run_mc admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
 retry run_mc admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
 
 # ======================
-# Apps
+# Aplicaciones
 # ======================
-log "Deploying Chatwoot..."
+log "Desplegando Chatwoot..."
 docker stack deploy -c chatwoot.yaml chatwoot
 sleep 8
 
-# Prepare Chatwoot DB (idempotent)
-log "Preparing Chatwoot database..."
+# Preparar DB de Chatwoot (idempotente)
+log "Preparando base de Chatwoot..."
 CW_CID="$(wait_for_container 'chatwoot_chatwoot_app' || true)"
 if [[ -n "${CW_CID}" ]]; then
   retry docker exec -i "${CW_CID}" bundle exec rails db:chatwoot_prepare || true
 else
-  log "WARNING: Chatwoot app container not found to run db:chatwoot_prepare"
+  log "AVISO: No se encontró el contenedor de Chatwoot para ejecutar db:chatwoot_prepare"
 fi
 
-log "Deploying Evolution API..."
+log "Desplegando Evolution API..."
 docker stack deploy -c evolution.yaml evolution
 sleep 8
 
-log "Deploying n8n..."
+log "Desplegando n8n..."
 docker stack deploy -c n8n.yaml n8n
 
 # ======================
-# Summary
+# Resumen
 # ======================
-log "All done!"
+log "¡Listo!"
 echo "  Portainer:   https://portainerapp.${DOMAIN}"
 echo "  n8n:         https://n8napp.${DOMAIN}  (webhook: https://n8nwebhookapp.${DOMAIN})"
 echo "  Chatwoot:    https://chatwootapp.${DOMAIN}"
 echo "  Evolution:   https://evolutionapiapp.${DOMAIN}"
-echo "  MinIO S3:    https://miniobackapp.${DOMAIN}  (Console: https://miniofrontapp.${DOMAIN})"
+echo "  MinIO S3:    https://miniobackapp.${DOMAIN}  (Consola: https://miniofrontapp.${DOMAIN})"
 echo "  RabbitMQ:    https://rabbitmqapp.${DOMAIN}"
