@@ -136,17 +136,14 @@ mv .env.tmp .env
 
 # Wrapper de mc (sin shell), sobre red host y --insecure (mientras LE emite)
 run_mc() {
-  docker run --rm --network host minio/mc --insecure "$@"
+  docker run --rm --network host \
+    -e MC_HOST_myminio="https://root:${MASTER_PASSWORD}@miniobackapp.${DOMAIN}" \
+    minio/mc --insecure "$@"
 }
 
-# Definir alias explícito y probar conectividad
-retry run_mc alias set myminio "https://miniobackapp.${DOMAIN}" root "${MASTER_PASSWORD}"
-retry run_mc alias ls
-
-# Crear bucket (idempotente)
+# Chequear conexión y crear recursos (idempotente)
+retry run_mc ls myminio
 retry run_mc mb "myminio/${MINIO_BUCKET}" || true
-
-# Crear usuario y asignar política readwrite (idempotente)
 retry run_mc admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
 retry run_mc admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
 
