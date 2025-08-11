@@ -42,7 +42,7 @@ if ! docker info 2>/dev/null | grep -q "Swarm: active"; then
   docker swarm init --advertise-addr="${IP_ADDR}" || true
 fi
 
-# Redes overlay attachable
+# Redes overlay attachable (idempotente)
 for net in traefik_public agent_network general_network; do
   if ! docker network inspect "$net" >/dev/null 2>&1; then
     docker network create -d overlay --attachable "$net" >/dev/null 2>&1 || true
@@ -78,6 +78,11 @@ ADMIN_EMAIL=${ADMIN_EMAIL}
 PASSWORD_32_LENGTH=${MASTER_PASSWORD}
 EOF
 
+# Exportar las variables del .env para que docker stack deploy las interpole
+set -a
+. ./.env
+set +a
+
 # ======================
 # Despliegue base
 # ======================
@@ -104,7 +109,7 @@ sleep 5
 log "Desplegando MinIO..."
 docker stack deploy -c minio.yaml minio
 
-# Esperar a que MinIO esté ready (200)
+# Esperar a que MinIO esté ready (200). Si no llega a 200, seguimos igual.
 log "Esperando a que MinIO responda /minio/health/ready..."
 for _ in {1..40}; do
   code="$(curl -sk -o /dev/null -w "%{http_code}" "https://miniobackapp.${DOMAIN}/minio/health/ready" || echo 000)"
@@ -143,11 +148,11 @@ mv .env.tmp .env
 # Helper de mc (cada llamada pasa MC_HOST_myminio y --insecure)
 run_mc() {
   docker run --rm --network host \
-    -e MC_HOST_myminio="https://root:${MASTER_PASSWORD}@miniobackapp.${DOMAIN}" \
+    -e MC_HOST_myminio="https://root:${PASSWORD_32_LENGTH}@miniobackapp.${DOMAIN}" \
     minio/mc --insecure "$@"
 }
 
-# Crear bucket y usuario (idempotente, sin 'mc ls' previo)
+# Crear bucket y usuario (idempotente)
 retry run_mc mb "myminio/${MINIO_BUCKET}" || true
 retry run_mc admin user add myminio "${MINIO_ACCESS_KEY}" "${MINIO_SECRET_KEY}" || true
 retry run_mc admin policy attach myminio readwrite --user "${MINIO_ACCESS_KEY}" || true
@@ -162,7 +167,8 @@ sleep 8
 log "Preparando base de Chatwoot..."
 CW_CID="$(wait_for_container 'chatwoot_chatwoot_app' || true)"
 if [[ -n "${CW_CID}" ]]; then
-  retry docker exec -i "${CW_CID}" bundle exec rails db:chatwoot_prepare || true
+  retry docker exec -e SECRET_KEY_BASE="${PASSWORD_32_LENGTH}" -e RAILS_ENV=production \
+    -i "${CW_CID}" bundle exec rails db:chatwoot_prepare || true
 else
   log "AVISO: No se encontró el contenedor de Chatwoot para ejecutar db:chatwoot_prepare"
 fi
